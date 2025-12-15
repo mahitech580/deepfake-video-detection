@@ -9,3 +9,4 @@ matplotlib
 yt-dlp
 requests
 streamlit
+seaborn

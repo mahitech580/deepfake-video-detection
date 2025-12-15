@@ -183,3 +183,12 @@ class AdvancedAnalyzer:
             'confidence': float(min(1.0, (0.3 - mean_score) * 3 + consistency)),
             'description': 'Consistently artificial facial features'
         }
+    
+    def analyze(self, frame_scores, frame=None, fft_magnitude=None):
+        """Run a full analysis pipeline and return all results"""
+        return {
+            "metrics": self.calculate_confidence_metrics(frame_scores),
+            "patterns": self.detect_manipulation_patterns(frame_scores),
+            "chart": self.generate_frame_analysis_chart(frame_scores),
+            "heatmap": self.generate_heatmap(frame, fft_magnitude) if frame is not None and fft_magnitude is not None else None
+        }

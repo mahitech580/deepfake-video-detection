@@ -9,15 +9,13 @@ from werkzeug.utils import secure_filename
 import traceback
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
-app.config['MAX_CONTENT_LENGTH'] = None  # No file size limit
+CORS(app)
+app.config['MAX_CONTENT_LENGTH'] = None
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['SECRET_KEY'] = 'deepfake_detection_secret_key'
-
-# Serve static files
 app.static_folder = 'static'
 
-# Initialize detector, downloader, and analyzer
+# Initialize components
 detector = DeepfakeDetector()
 detector.build_model()
 downloader = VideoDownloader()
@@ -38,43 +36,32 @@ def detection():
 
 @app.route('/check_url', methods=['POST'])
 def check_url():
-    """Check if URL is valid before analysis"""
     try:
         url = request.json.get('url', '').strip()
         if not url:
             return jsonify({'valid': False, 'error': 'No URL provided'})
-        
-        # Basic URL validation
         if not (url.startswith('http://') or url.startswith('https://')):
             return jsonify({'valid': False, 'error': 'Invalid URL format'})
-        
-        # Check for placeholder URLs
         if 'VIDEO_ID' in url or 'example.com' in url:
             return jsonify({'valid': False, 'error': 'Please use a real video URL, not a placeholder'})
-        
         return jsonify({'valid': True})
-        
     except Exception as e:
         return jsonify({'valid': False, 'error': str(e)})
 
 @app.route('/analyze', methods=['POST'])
 def analyze_video():
+    tmp_path = None
     try:
-        tmp_path = None
         video_title = "Unknown"
-        
-        # Check if it's a URL or file upload
+
+        # Handle upload or URL
         if 'url' in request.form and request.form['url'].strip():
-            # URL-based analysis
             url = request.form['url'].strip()
             tmp_path, video_title = downloader.download_video(url)
-            
         elif 'video' in request.files:
-            # File upload analysis
             file = request.files['video']
             if file.filename == '':
                 return jsonify({'error': 'No file selected'})
-            
             if file and allowed_file(file.filename):
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
                     file.save(tmp_file.name)
@@ -84,13 +71,14 @@ def analyze_video():
                 return jsonify({'error': 'Invalid file format'})
         else:
             return jsonify({'error': 'No video file or URL provided'})
-        
+
         if not tmp_path:
             return jsonify({'error': 'Failed to process video'})
-        
-        # Analyze video
+
+        # Run prediction
         analysis_result = detector.predict_video(tmp_path)
-        
+
+        # Extract basic results
         if isinstance(analysis_result, dict):
             score = analysis_result['score']
             frames_extracted = analysis_result['frames_extracted']
@@ -103,19 +91,18 @@ def analyze_video():
             frames_analyzed = 10
             fake_probability = 1 - score
             authenticity_percentage = score * 100
-        
-        # Enhanced classification with stricter thresholds
+
         faces_detected = analysis_result.get('faces_detected', 0) if isinstance(analysis_result, dict) else 0
         metadata = analysis_result.get('metadata', {}) if isinstance(analysis_result, dict) else {}
-        
-        # Adjust thresholds based on analysis quality
-        if faces_detected > frames_analyzed * 0.7:  # Good face detection
+
+        # Threshold logic
+        if faces_detected > frames_analyzed * 0.7:
             real_threshold = 0.65
             fake_threshold = 0.35
-        else:  # Poor face detection - be more conservative
+        else:
             real_threshold = 0.75
             fake_threshold = 0.25
-        
+
         if score >= real_threshold:
             result = "REAL VIDEO"
             confidence = f"{min(99, int(88 + (score - real_threshold) * 30))}%"
@@ -127,37 +114,36 @@ def analyze_video():
             color = "danger"
             prediction = "DEEPFAKE"
         else:
-            # Provide more specific uncertain reasons
             uncertainty_reason = "Insufficient confidence"
             if faces_detected < frames_analyzed * 0.3:
                 uncertainty_reason = "Limited facial data"
             elif len(metadata.get('suspicious_patterns', [])) > 0:
                 uncertainty_reason = "Suspicious metadata detected"
-            
             result = f"UNCERTAIN - {uncertainty_reason}"
             confidence = f"{int(40 + abs(score - 0.5) * 40)}%"
             color = "warning"
             prediction = "NEEDS_REVIEW"
-        
-        # Clean up
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        
-        # Generate advanced analysis
+
+        # Advanced analysis
         advanced_metrics = {}
         chart_data = None
         heatmap_data = None
-        
+
         if isinstance(analysis_result, dict) and 'frame_scores' in analysis_result:
             frame_scores = analysis_result['frame_scores']
             if len(frame_scores) > 1:
-                advanced_metrics = analyzer.calculate_confidence_metrics(frame_scores)
-                chart_data = analyzer.generate_frame_analysis_chart(frame_scores)
-                
-                # Generate manipulation pattern analysis
-                patterns = analyzer.detect_manipulation_patterns(frame_scores)
-                advanced_metrics['patterns'] = patterns
-        
+                sample_frame = analysis_result.get('sample_frame')
+                fft_magnitude = analysis_result.get('fft_magnitude')
+                advanced_results = analyzer.analyze(frame_scores, sample_frame, fft_magnitude)
+                advanced_metrics = advanced_results["metrics"]
+                advanced_metrics["patterns"] = advanced_results["patterns"]
+                chart_data = advanced_results["chart"]
+                heatmap_data = advanced_results["heatmap"]
+
+        # Clean up
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
         return jsonify({
             'score': round(float(score), 3),
             'result': result,
@@ -185,16 +171,12 @@ def analyze_video():
             'chart_data': chart_data,
             'heatmap_data': heatmap_data
         })
-        
+
     except Exception as e:
-        # Clean up on error
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
-        
-        # Log the full error for debugging
         error_details = traceback.format_exc()
         print(f"Analysis error: {error_details}")
-        
         return jsonify({
             'error': f'Analysis failed: {str(e)}',
             'details': 'Please check the video format and try again'

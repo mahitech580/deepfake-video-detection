@@ -2,9 +2,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_cors import CORS
 import os
 import tempfile
-from deepfake_detector import DeepfakeDetector
 from video_downloader import VideoDownloader
-from advanced_features import AdvancedAnalyzer
 from werkzeug.utils import secure_filename
 import traceback
 
@@ -15,11 +13,26 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['SECRET_KEY'] = 'deepfake_detection_secret_key'
 app.static_folder = 'static'
 
-# Initialize components
-detector = DeepfakeDetector()
-detector.build_model()
+# Initialize lightweight components. Load compute-heavy libraries only when analysis is requested,
+# so Render can serve the frontend within the free instance memory limit.
+detector = None
+analyzer = None
 downloader = VideoDownloader()
-analyzer = AdvancedAnalyzer()
+
+def get_detector():
+    global detector
+    if detector is None:
+        from deepfake_detector import DeepfakeDetector
+        detector = DeepfakeDetector()
+        detector.build_model()
+    return detector
+
+def get_analyzer():
+    global analyzer
+    if analyzer is None:
+        from advanced_features import AdvancedAnalyzer
+        analyzer = AdvancedAnalyzer()
+    return analyzer
 
 ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv'}
 
@@ -76,7 +89,7 @@ def analyze_video():
             return jsonify({'error': 'Failed to process video'})
 
         # Run prediction
-        analysis_result = detector.predict_video(tmp_path)
+        analysis_result = get_detector().predict_video(tmp_path)
 
         # Extract basic results
         if isinstance(analysis_result, dict):
@@ -134,7 +147,7 @@ def analyze_video():
             if len(frame_scores) > 1:
                 sample_frame = analysis_result.get('sample_frame')
                 fft_magnitude = analysis_result.get('fft_magnitude')
-                advanced_results = analyzer.analyze(frame_scores, sample_frame, fft_magnitude)
+                advanced_results = get_analyzer().analyze(frame_scores, sample_frame, fft_magnitude)
                 advanced_metrics = advanced_results["metrics"]
                 advanced_metrics["patterns"] = advanced_results["patterns"]
                 chart_data = advanced_results["chart"]

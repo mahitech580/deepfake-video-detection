@@ -2,7 +2,7 @@
 
 Advanced deepfake detection using CNN and frequency domain analysis for social media integrity.
 
-## 🎯 Features
+# 🎯 Features
 
 - **ResNet50 + FFT Analysis**: Combines spatial and frequency domain features
 - **Real-time Detection**: Fast video processing and authenticity scoring

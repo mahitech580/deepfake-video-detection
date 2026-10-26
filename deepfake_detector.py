@@ -67,7 +67,7 @@ class DeepfakeDetector:
         # Return both full frames and face crops
         return {
             'full_frames': np.array(frames),
-            'face_frames': np.array(face_frames) if face_frames else np.array(frames[:10]),
+            'face_frames': np.array(face_frames) if face_frames else np.empty((0, *self.img_size, 3), dtype=np.uint8),
             'total_extracted': len(frames),
             'faces_detected': len(face_frames)
         }
@@ -208,22 +208,30 @@ class DeepfakeDetector:
         face_frames = frame_data['face_frames']
         
         if len(full_frames) == 0:
-            return {
-                'score': 0.5, 'frames_extracted': 0, 'frames_analyzed': 0, 
-                'frame_scores': [], 'metadata': metadata
-            }
+            raise ValueError(
+                "No decodable video frames were found. Verify the file is a supported, non-corrupt video."
+            )
         
         # Analyze both full frames and face crops
         full_scores = self.analyze_frames(full_frames, max_analyze=200)
         face_scores = self.analyze_frames(face_frames, max_analyze=150) if len(face_frames) > 0 else []
         
         # Combine scores with weighted approach
-        if len(face_scores) > 0:
-            # Give more weight to face-focused analysis
-            combined_scores = (np.array(full_scores) * 0.4 + 
-                             np.array(face_scores[:len(full_scores)]) * 0.6)
+        if len(face_scores) > 0 and len(full_scores) > 0:
+            # Face crops exist only for frames where a face was detected, so their
+            # count may differ from the full-frame sample count. Align both score
+            # sequences to the same normalized timeline before combining them.
+            full_score_array = np.asarray(full_scores, dtype=float)
+            face_score_array = np.asarray(face_scores, dtype=float)
+            face_positions = np.linspace(0.0, 1.0, num=len(face_score_array))
+            full_positions = np.linspace(0.0, 1.0, num=len(full_score_array))
+            aligned_face_scores = np.interp(
+                full_positions, face_positions, face_score_array
+            )
+            combined_scores = full_score_array * 0.4 + aligned_face_scores * 0.6
         else:
-            combined_scores = np.array(full_scores)
+            # Do not fabricate face scores when no face was detected.
+            combined_scores = np.asarray(full_scores, dtype=float)
         
         # Enhanced confidence calculation
         final_score = self.calculate_enhanced_confidence(combined_scores, metadata)

@@ -1,6 +1,6 @@
-# Production dependencies for the Flask web application deployed on Vercel.
+# Production dependencies for the Flask web application.
 # Training and the optional Streamlit UI are in requirements-training.txt.
-tensorflow
+tensorflow==2.21.0
 opencv-python-headless
 numpy
 flask

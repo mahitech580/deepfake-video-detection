@@ -1,0 +1,4 @@
+# Optional dependencies for local model training and the Streamlit demo.
+-r requirements.txt
+scikit-learn
+streamlit

@@ -43,12 +43,24 @@ class DeepfakeDetector:
                 
                 # Face detection and cropping
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+                # Haar face detection on full-HD frames is too slow on free CPU.
+                # Detect on a width-capped preview, then scale the box back to the source.
+                detect_width = min(320, gray.shape[1])
+                if gray.shape[1] > detect_width:
+                    detect_height = max(1, int(round(gray.shape[0] * detect_width / gray.shape[1])))
+                    detection_gray = cv2.resize(gray, (detect_width, detect_height), interpolation=cv2.INTER_AREA)
+                else:
+                    detection_gray = gray
+                faces = face_cascade.detectMultiScale(detection_gray, 1.1, 4, minSize=(20, 20))
                 
                 if len(faces) > 0:
-                    # Use the largest face
+                    # Use the largest face and map the detection box to source coordinates.
                     largest_face = max(faces, key=lambda x: x[2] * x[3])
-                    x, y, w, h = largest_face
+                    x, y, w, h = (int(v) for v in largest_face)
+                    if detection_gray.shape != gray.shape:
+                        sx = frame.shape[1] / detection_gray.shape[1]
+                        sy = frame.shape[0] / detection_gray.shape[0]
+                        x, y, w, h = int(round(x * sx)), int(round(y * sy)), int(round(w * sx)), int(round(h * sy))
                     
                     # Expand face region by 20%
                     margin = int(0.2 * max(w, h))
@@ -216,7 +228,7 @@ class DeepfakeDetector:
         
         # Extract frames with face detection
         # Keep peak memory predictable on small CPU instances.
-        frame_data = self.extract_frames(video_path, max_frames=30)
+        frame_data = self.extract_frames(video_path, max_frames=8)
         full_frames = frame_data['full_frames']
         face_frames = frame_data['face_frames']
         
@@ -226,8 +238,8 @@ class DeepfakeDetector:
             )
         
         # Analyze both full frames and face crops
-        full_scores = self.analyze_frames(full_frames, max_analyze=30)
-        face_scores = self.analyze_frames(face_frames, max_analyze=30) if len(face_frames) > 0 else []
+        full_scores = self.analyze_frames(full_frames, max_analyze=8)
+        face_scores = self.analyze_frames(face_frames, max_analyze=8) if len(face_frames) > 0 else []
         
         # Combine scores with weighted approach
         if len(face_scores) > 0 and len(full_scores) > 0:

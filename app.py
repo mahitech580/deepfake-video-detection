@@ -170,21 +170,28 @@ def analyze_video():
             color = "warning"
             prediction = "NEEDS_REVIEW"
 
-        # Advanced analysis
-        advanced_metrics = {}
+        # Keep server-side post-processing light. Plotting libraries are intentionally
+        # not imported for each request because this free instance has a 512 MiB RAM cap.
         chart_data = None
         heatmap_data = None
-
-        if isinstance(analysis_result, dict) and 'frame_scores' in analysis_result:
-            frame_scores = analysis_result['frame_scores']
-            if len(frame_scores) > 1:
-                sample_frame = analysis_result.get('sample_frame')
-                fft_magnitude = analysis_result.get('fft_magnitude')
-                advanced_results = get_analyzer().analyze(frame_scores, sample_frame, fft_magnitude)
-                advanced_metrics = advanced_results["metrics"]
-                advanced_metrics["patterns"] = advanced_results["patterns"]
-                chart_data = advanced_results["chart"]
-                heatmap_data = advanced_results["heatmap"]
+        frame_scores = analysis_result.get("frame_scores", []) if isinstance(analysis_result, dict) else []
+        advanced_metrics = {}
+        if len(frame_scores) > 1:
+            import numpy as np
+            scores = np.asarray(frame_scores, dtype=np.float32)
+            differences = np.abs(np.diff(scores))
+            mean_score = float(np.mean(scores))
+            std_deviation = float(np.std(scores))
+            advanced_metrics = {
+                "mean_score": mean_score,
+                "std_deviation": std_deviation,
+                "consistency": float(max(0.0, 1.0 - std_deviation)),
+                "temporal_stability": float(max(0.0, 1.0 - float(np.mean(differences)))) if len(differences) else 1.0,
+                "confidence_interval": {
+                    "lower": float(max(0.0, mean_score - 1.96 * std_deviation / np.sqrt(len(scores)))),
+                    "upper": float(min(1.0, mean_score + 1.96 * std_deviation / np.sqrt(len(scores))))
+                }
+            }
 
         # Clean up
         if os.path.exists(tmp_path):
@@ -203,6 +210,7 @@ def analyze_video():
             'fake_probability': round(fake_probability * 100, 1),
             'authenticity_percentage': round(authenticity_percentage, 1),
             'model_info': 'ResNet50 + custom classifier',
+            'frame_scores': frame_scores,
             'metadata': metadata,
             'analysis_quality': {
                 'face_detection_rate': round(faces_detected / max(frames_analyzed, 1) * 100, 1),

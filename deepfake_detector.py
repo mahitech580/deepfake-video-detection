@@ -1,27 +1,19 @@
 import cv2
 import numpy as np
-import tensorflow as tf
-
-# Use bounded CPU parallelism; multiple TensorFlow worker pools increase peak
-# memory on small container instances and offer little benefit for one video job.
-try:
-    tf.config.threading.set_intra_op_parallelism_threads(1)
-    tf.config.threading.set_inter_op_parallelism_threads(1)
-except RuntimeError:
-    # TensorFlow may already be initialized by an embedding environment.
-    pass
-
-from tensorflow.keras.applications import ResNet50
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
-from tensorflow.keras.models import Model
 import os
 import json
 from datetime import datetime
+
+# TensorFlow is deliberately lazy-loaded for training or legacy H5 files only.
+# Production inference uses the weight-quantized LiteRT model to fit small instances.
 
 class DeepfakeDetector:
     def __init__(self, img_size=(224, 224)):
         self.img_size = img_size
         self.model = None
+        self.interpreter = None
+        self.input_details = None
+        self.output_details = None
         
     def extract_frames(self, video_path, max_frames=30):
         """Extract frames from video with facial region detection"""
@@ -106,7 +98,17 @@ class DeepfakeDetector:
         return np.array(fft_features)
     
     def build_model(self):
-        """Build enhanced CNN model with ResNet50 backbone"""
+        """Build enhanced CNN model with ResNet50 backbone (training only)."""
+        import tensorflow as tf
+        try:
+            tf.config.threading.set_intra_op_parallelism_threads(1)
+            tf.config.threading.set_inter_op_parallelism_threads(1)
+        except RuntimeError:
+            pass
+        from tensorflow.keras.applications import ResNet50
+        from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
+        from tensorflow.keras.models import Model
+        self.interpreter = None
         # Base ResNet50 model
         base_model = ResNet50(weights='imagenet', include_top=False, input_shape=(*self.img_size, 3))
         
@@ -206,7 +208,7 @@ class DeepfakeDetector:
     
     def predict_video(self, video_path):
         """Enhanced video prediction with facial analysis and metadata"""
-        if self.model is None:
+        if self.model is None and self.interpreter is None:
             raise ValueError("Model not trained or loaded")
         
         # Extract metadata
@@ -260,28 +262,45 @@ class DeepfakeDetector:
         }
     
     def analyze_frames(self, frames, max_analyze=200):
-        """Analyze frames in optimized batches"""
+        """Run inference with low-memory LiteRT in production or Keras in training/dev."""
         frame_scores = []
         frames_to_analyze = min(len(frames), max_analyze)
-        
-        # Small batches reduce activation memory on Render's 512 MiB free instance.
+
+        if self.interpreter is not None:
+            input_info = self.input_details
+            output_info = self.output_details
+            input_index = input_info["index"]
+            output_index = output_info["index"]
+            input_dtype = input_info["dtype"]
+            quant_scale, quant_zero = input_info.get("quantization", (0.0, 0))
+            for i in range(frames_to_analyze):
+                normalized = frames[i:i + 1].astype(np.float32, copy=False) / np.float32(255.0)
+                if np.issubdtype(input_dtype, np.integer):
+                    if quant_scale <= 0:
+                        raise RuntimeError("Quantized model input is missing its scale metadata.")
+                    normalized = np.rint(normalized / quant_scale + quant_zero)
+                    limits = np.iinfo(input_dtype)
+                    normalized = np.clip(normalized, limits.min, limits.max).astype(input_dtype)
+                else:
+                    normalized = normalized.astype(input_dtype, copy=False)
+                self.interpreter.set_tensor(input_index, normalized)
+                self.interpreter.invoke()
+                prediction = self.interpreter.get_tensor(output_index)
+                frame_scores.extend(float(v) for v in np.asarray(prediction).reshape(-1))
+            return frame_scores
+
+        if self.model is None:
+            raise RuntimeError("No trained inference model has been loaded.")
+
         batch_size = 2
         for i in range(0, frames_to_analyze, batch_size):
-            batch_end = min(i + batch_size, frames_to_analyze)
-            batch_frames = frames[i:batch_end]
-            
-            # Normalize and predict
-            # Explicit float32 avoids NumPy's float64 promotion and halves input memory.
+            batch_frames = frames[i:min(i + batch_size, frames_to_analyze)]
             batch_normalized = batch_frames.astype(np.float32, copy=False) / np.float32(255.0)
-            # Calling the model directly avoids the tf.data predict adapter's extra
-            # overhead when processing small batches in a memory-constrained container.
             predictions = self.model(batch_normalized, training=False)
             batch_scores = predictions.numpy() if hasattr(predictions, "numpy") else np.asarray(predictions)
-            
-            frame_scores.extend([float(score[0]) for score in batch_scores])
-        
+            frame_scores.extend(float(score[0]) for score in batch_scores)
         return frame_scores
-    
+
     def extract_metadata(self, video_path):
         """Extract video metadata for analysis"""
         cap = cv2.VideoCapture(video_path)
@@ -367,6 +386,27 @@ class DeepfakeDetector:
             self.model.save(filepath)
     
     def load_model(self, filepath):
-        """Load trained model"""
-        # Inference-only service; skip optimizer/metric restoration to conserve RAM.
+        """Load a LiteRT model for low-memory inference, or legacy H5 for dev."""
+        if str(filepath).lower().endswith(".tflite"):
+            try:
+                from ai_edge_litert.interpreter import Interpreter
+            except ImportError as exc:
+                raise RuntimeError(
+                    "The low-memory LiteRT runtime is missing; install ai-edge-litert."
+                ) from exc
+            self.interpreter = Interpreter(model_path=filepath, num_threads=1)
+            self.interpreter.allocate_tensors()
+            self.input_details = self.interpreter.get_input_details()[0]
+            self.output_details = self.interpreter.get_output_details()[0]
+            self.model = None
+            return self.interpreter
+
+        import tensorflow as tf
+        try:
+            tf.config.threading.set_intra_op_parallelism_threads(1)
+            tf.config.threading.set_inter_op_parallelism_threads(1)
+        except RuntimeError:
+            pass
+        self.interpreter = None
         self.model = tf.keras.models.load_model(filepath, compile=False)
+        return self.model

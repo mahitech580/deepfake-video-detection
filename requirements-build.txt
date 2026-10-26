@@ -1,0 +1,4 @@
+# Build-only dependency for converting the tracked trained H5 model to a compact TFLite artifact.
+tensorflow==2.21.0
+numpy==1.26.4
+h5py==3.14.0

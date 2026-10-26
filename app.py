@@ -22,7 +22,7 @@ analyzer = None
 # loading duplicate TensorFlow models or exceeding the free instance memory cap.
 MODEL_LOCK = RLock()
 downloader = VideoDownloader()
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deepfake_model.h5")
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deepfake_model.tflite")
 
 def get_detector():
     """Thread-safe lazy loading of the saved trained model."""
@@ -34,7 +34,7 @@ def get_detector():
             if not os.path.isfile(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1_000_000:
                 raise RuntimeError(
                     "Trained model weights are unavailable on the server. "
-                    "Ensure Git LFS downloaded deepfake_model.h5 before deployment."
+                    "Ensure deepfake_model.tflite is generated during the build before deployment."
                 )
 
             candidate = DeepfakeDetector()
@@ -43,7 +43,7 @@ def get_detector():
             except Exception as exc:
                 raise RuntimeError(
                     "The trained model file could not be loaded. "
-                    "Check the deployed model file and TensorFlow compatibility."
+                    "Check the generated TFLite model and LiteRT runtime compatibility."
                 ) from exc
             detector = candidate
         return detector
@@ -68,7 +68,8 @@ def health():
         'status': 'ok',
         'trained_model_available': model_size >= 1_000_000,
         'model_size_bytes': model_size,
-        'model_loaded': detector is not None
+        'model_loaded': detector is not None,
+        'model_format': 'LiteRT TFLite (weight-quantized)'
     })
 
 @app.route('/')

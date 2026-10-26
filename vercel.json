@@ -1,23 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "builds": [
-    {
-      "src": "static/**/*",
-      "use": "@vercel/static"
+  "functions": {
+    "app.py": {
+      "maxDuration": 300,
+      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,**/test_*.py,fixtures/**,uploads/**,static/**,public/**,deepfake_model.h5,requirements-build.txt,convert_model.py,build_vercel.py}"
     }
-  ],
-  "routes": [
-    {
-      "src": "/detection/?",
-      "dest": "/static/detection.html"
-    },
-    {
-      "src": "/",
-      "dest": "/static/index.html"
-    },
-    {
-      "src": "/static/(.*)",
-      "dest": "/static/$1"
-    }
-  ]
+  }
 }

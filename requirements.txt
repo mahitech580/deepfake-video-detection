@@ -2,7 +2,7 @@
 # Training and the optional Streamlit UI are in requirements-training.txt.
 tensorflow==2.21.0
 opencv-python-headless==4.11.0.86
-numpy
+numpy==1.26.4
 flask
 flask-cors
 pillow

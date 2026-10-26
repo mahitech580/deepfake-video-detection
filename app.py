@@ -18,13 +18,29 @@ app.static_folder = 'static'
 detector = None
 analyzer = None
 downloader = VideoDownloader()
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deepfake_model.h5")
 
 def get_detector():
+    """Load the repository's trained model; never silently return an untrained classifier."""
     global detector
     if detector is None:
         from deepfake_detector import DeepfakeDetector
-        detector = DeepfakeDetector()
-        detector.build_model()
+
+        if not os.path.isfile(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1_000_000:
+            raise RuntimeError(
+                "Trained model weights are unavailable on the server. "
+                "Ensure Git LFS downloaded deepfake_model.h5 before deployment."
+            )
+
+        candidate = DeepfakeDetector()
+        try:
+            candidate.load_model(MODEL_PATH)
+        except Exception as exc:
+            raise RuntimeError(
+                "The trained model file could not be loaded. "
+                "Check the deployed model file and TensorFlow compatibility."
+            ) from exc
+        detector = candidate
     return detector
 
 def get_analyzer():
@@ -38,6 +54,17 @@ ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/health')
+def health():
+    """Lightweight deployment and trained-model availability check."""
+    model_size = os.path.getsize(MODEL_PATH) if os.path.isfile(MODEL_PATH) else 0
+    return jsonify({
+        'status': 'ok',
+        'trained_model_available': model_size >= 1_000_000,
+        'model_size_bytes': model_size,
+        'model_loaded': detector is not None
+    })
 
 @app.route('/')
 def index():
@@ -169,11 +196,7 @@ def analyze_video():
             'faces_detected': faces_detected,
             'fake_probability': round(fake_probability * 100, 1),
             'authenticity_percentage': round(authenticity_percentage, 1),
-            'model_info': 'Enhanced DenseNet + GoogLeNet',
-            'accuracy': '96.2%',
-            'precision': '0.98',
-            'recall': '0.97',
-            'f1_score': '0.975',
+            'model_info': 'ResNet50 + custom classifier',
             'metadata': metadata,
             'analysis_quality': {
                 'face_detection_rate': round(faces_detected / max(frames_analyzed, 1) * 100, 1),

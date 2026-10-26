@@ -1195,7 +1195,7 @@
                 }, 650);
 
                 // Fail closed until the backend and trained weights are ready.
-                const healthResponse = await fetch('https://deepfake-video-detection-lite.onrender.com/health');
+                const healthResponse = await fetch('/health');
                 const health = await healthResponse.json().catch(function () { return {}; });
                 if (!healthResponse.ok || health.status !== 'ok') {
                     throw new Error('The analysis backend is still being updated. Please try again shortly.');
@@ -1204,7 +1204,7 @@
                     throw new Error('The trained model is not available on the server yet. Analysis is disabled until the model is loaded.');
                 }
 
-                const response = await fetch('https://deepfake-video-detection-lite.onrender.com/analyze', {
+                const response = await fetch('/analyze', {
                     method: 'POST',
                     body: formData
                 });

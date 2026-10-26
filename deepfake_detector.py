@@ -4,7 +4,6 @@ import tensorflow as tf
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
 from tensorflow.keras.models import Model
-from sklearn.model_selection import train_test_split
 import os
 import json
 from datetime import datetime
@@ -170,7 +169,15 @@ class DeepfakeDetector:
         return np.array(X), np.array(y)
     
     def train(self, video_paths, labels, epochs=10, batch_size=32):
-        """Train the model"""
+        """Train the model. Training-only dependencies are imported on demand."""
+        try:
+            from sklearn.model_selection import train_test_split
+        except ImportError as exc:
+            raise ImportError(
+                "Model training requires scikit-learn. Install it with "
+                "`pip install -r requirements-training.txt`."
+            ) from exc
+
         if self.model is None:
             self.build_model()
             

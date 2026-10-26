@@ -4,6 +4,7 @@ import os
 import tempfile
 from video_downloader import VideoDownloader
 from werkzeug.utils import secure_filename
+from threading import RLock
 import traceback
 
 app = Flask(__name__)
@@ -17,31 +18,35 @@ app.static_folder = 'static'
 # so Render can serve the frontend within the free instance memory limit.
 detector = None
 analyzer = None
+# Serialize model loading and inference to prevent concurrent requests from
+# loading duplicate TensorFlow models or exceeding the free instance memory cap.
+MODEL_LOCK = RLock()
 downloader = VideoDownloader()
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deepfake_model.h5")
 
 def get_detector():
-    """Load the repository's trained model; never silently return an untrained classifier."""
+    """Thread-safe lazy loading of the saved trained model."""
     global detector
-    if detector is None:
-        from deepfake_detector import DeepfakeDetector
+    with MODEL_LOCK:
+        if detector is None:
+            from deepfake_detector import DeepfakeDetector
 
-        if not os.path.isfile(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1_000_000:
-            raise RuntimeError(
-                "Trained model weights are unavailable on the server. "
-                "Ensure Git LFS downloaded deepfake_model.h5 before deployment."
-            )
+            if not os.path.isfile(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1_000_000:
+                raise RuntimeError(
+                    "Trained model weights are unavailable on the server. "
+                    "Ensure Git LFS downloaded deepfake_model.h5 before deployment."
+                )
 
-        candidate = DeepfakeDetector()
-        try:
-            candidate.load_model(MODEL_PATH)
-        except Exception as exc:
-            raise RuntimeError(
-                "The trained model file could not be loaded. "
-                "Check the deployed model file and TensorFlow compatibility."
-            ) from exc
-        detector = candidate
-    return detector
+            candidate = DeepfakeDetector()
+            try:
+                candidate.load_model(MODEL_PATH)
+            except Exception as exc:
+                raise RuntimeError(
+                    "The trained model file could not be loaded. "
+                    "Check the deployed model file and TensorFlow compatibility."
+                ) from exc
+            detector = candidate
+        return detector
 
 def get_analyzer():
     global analyzer
@@ -115,8 +120,9 @@ def analyze_video():
         if not tmp_path:
             return jsonify({'error': 'Failed to process video'})
 
-        # Run prediction
-        analysis_result = get_detector().predict_video(tmp_path)
+        # Only one inference at a time on the memory-limited free instance.
+        with MODEL_LOCK:
+            analysis_result = get_detector().predict_video(tmp_path)
 
         # Extract basic results
         if isinstance(analysis_result, dict):

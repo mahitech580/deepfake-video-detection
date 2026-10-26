@@ -1,0 +1,13 @@
+# Keep local datasets and generated artifacts out of Vercel deployments.
+.git/
+.venv/
+venv/
+__pycache__/
+data/
+datasets/
+uploads/
+tests/
+*.mp4
+*.avi
+*.mov
+*.mkv

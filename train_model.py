@@ -1,5 +1,4 @@
 import os
-import pandas as pd
 from deepfake_detector import DeepfakeDetector
 import argparse
 

@@ -1,6 +1,16 @@
 import cv2
 import numpy as np
 import tensorflow as tf
+
+# Use bounded CPU parallelism; multiple TensorFlow worker pools increase peak
+# memory on small container instances and offer little benefit for one video job.
+try:
+    tf.config.threading.set_intra_op_parallelism_threads(1)
+    tf.config.threading.set_inter_op_parallelism_threads(1)
+except RuntimeError:
+    # TensorFlow may already be initialized by an embedding environment.
+    pass
+
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
 from tensorflow.keras.models import Model

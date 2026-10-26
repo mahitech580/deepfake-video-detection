@@ -1434,6 +1434,61 @@
                 chart.style.height = 'auto';
                 chart.style.gridColumn = '1 / -1';
                 frameGrid.appendChild(chart);
+            } else if (Array.isArray(result.frame_scores) && result.frame_scores.length > 1) {
+                // Draw the model's actual frame scores in the browser. This avoids
+                // importing Matplotlib/Seaborn into the memory-limited API process.
+                const chart = document.createElement('canvas');
+                chart.width = 900;
+                chart.height = 320;
+                chart.style.width = '100%';
+                chart.style.maxWidth = '900px';
+                chart.style.height = 'auto';
+                chart.style.gridColumn = '1 / -1';
+                chart.setAttribute('aria-label', 'Frame-wise estimated fake probability');
+                frameGrid.appendChild(chart);
+
+                const ctx = chart.getContext('2d');
+                const W = chart.width, H = chart.height;
+                const pad = {left: 64, right: 24, top: 24, bottom: 48};
+                const plotW = W - pad.left - pad.right;
+                const plotH = H - pad.top - pad.bottom;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, W, H);
+                ctx.font = '14px Inter, sans-serif';
+                ctx.fillStyle = '#374151';
+                ctx.strokeStyle = '#e5e7eb';
+                ctx.lineWidth = 1;
+
+                for (let tick = 0; tick <= 100; tick += 25) {
+                    const y = pad.top + plotH * (1 - tick / 100);
+                    ctx.beginPath();
+                    ctx.moveTo(pad.left, y);
+                    ctx.lineTo(W - pad.right, y);
+                    ctx.stroke();
+                    ctx.fillText(tick + '%', 14, y + 5);
+                }
+
+                const fakeScores = result.frame_scores.map(value => {
+                    const n = Number(value);
+                    return (1 - Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0.5))) * 100;
+                });
+                ctx.strokeStyle = '#dc2626';
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                fakeScores.forEach((value, index) => {
+                    const x = pad.left + (index / Math.max(fakeScores.length - 1, 1)) * plotW;
+                    const y = pad.top + plotH * (1 - value / 100);
+                    if (index === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+                ctx.fillStyle = '#374151';
+                ctx.fillText('Frame number', W / 2 - 42, H - 12);
+                ctx.save();
+                ctx.translate(20, H / 2 + 38);
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillText('Estimated fake probability', 0, 0);
+                ctx.restore();
             } else {
                 const message = document.createElement('p');
                 message.className = 'text-muted';

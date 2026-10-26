@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "flask",
+  "fluid": true,
+  "functions": {
+    "app.py": {
+      "maxDuration": 300,
+      "excludeFiles": "{data/**,datasets/**,uploads/**,tests/**,venv/**,.venv/**,__pycache__/**,*.mp4,*.avi,*.mov,*.mkv}"
+    }
+  }
+}

@@ -6,7 +6,6 @@ numpy==1.26.4
 flask
 flask-cors
 pillow
-matplotlib
+
 yt-dlp
 requests
-seaborn

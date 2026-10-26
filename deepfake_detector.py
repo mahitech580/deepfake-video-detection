@@ -23,7 +23,7 @@ class DeepfakeDetector:
         self.img_size = img_size
         self.model = None
         
-    def extract_frames(self, video_path, max_frames=60):
+    def extract_frames(self, video_path, max_frames=30):
         """Extract frames from video with facial region detection"""
         cap = cv2.VideoCapture(video_path)
         frames = []
@@ -214,7 +214,7 @@ class DeepfakeDetector:
         
         # Extract frames with face detection
         # Keep peak memory predictable on small CPU instances.
-        frame_data = self.extract_frames(video_path, max_frames=60)
+        frame_data = self.extract_frames(video_path, max_frames=30)
         full_frames = frame_data['full_frames']
         face_frames = frame_data['face_frames']
         
@@ -224,8 +224,8 @@ class DeepfakeDetector:
             )
         
         # Analyze both full frames and face crops
-        full_scores = self.analyze_frames(full_frames, max_analyze=60)
-        face_scores = self.analyze_frames(face_frames, max_analyze=60) if len(face_frames) > 0 else []
+        full_scores = self.analyze_frames(full_frames, max_analyze=30)
+        face_scores = self.analyze_frames(face_frames, max_analyze=30) if len(face_frames) > 0 else []
         
         # Combine scores with weighted approach
         if len(face_scores) > 0 and len(full_scores) > 0:
@@ -265,7 +265,7 @@ class DeepfakeDetector:
         frames_to_analyze = min(len(frames), max_analyze)
         
         # Small batches reduce activation memory on Render's 512 MiB free instance.
-        batch_size = 4
+        batch_size = 2
         for i in range(0, frames_to_analyze, batch_size):
             batch_end = min(i + batch_size, frames_to_analyze)
             batch_frames = frames[i:batch_end]
@@ -273,7 +273,10 @@ class DeepfakeDetector:
             # Normalize and predict
             # Explicit float32 avoids NumPy's float64 promotion and halves input memory.
             batch_normalized = batch_frames.astype(np.float32, copy=False) / np.float32(255.0)
-            batch_scores = self.model.predict(batch_normalized, verbose=0)
+            # Calling the model directly avoids the tf.data predict adapter's extra
+            # overhead when processing small batches in a memory-constrained container.
+            predictions = self.model(batch_normalized, training=False)
+            batch_scores = predictions.numpy() if hasattr(predictions, "numpy") else np.asarray(predictions)
             
             frame_scores.extend([float(score[0]) for score in batch_scores])
         
